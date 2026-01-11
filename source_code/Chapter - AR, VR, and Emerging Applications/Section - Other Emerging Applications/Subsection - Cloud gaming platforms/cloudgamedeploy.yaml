@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudgame-server
+spec:
+  replicas: 4 # scale to meet latency tail targets
+  selector:
+    matchLabels:
+      app: cloudgame
+  template:
+    metadata:
+      labels:
+        app: cloudgame
+    spec:
+      nodeSelector:
+        mec: "true" # schedule to MEC-labelled edge nodes
+      tolerations:
+      - key: "gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: renderer
+        image: myorg/cloudgame-server:stable # contains game server + GStreamer/WebRTC
+        securityContext:
+          runAsUser: 1000
+          runAsNonRoot: true
+        resources:
+          limits:
+            \lstinline|nvidia.com/gpu|: "1" # request one GPU via device plugin
+            cpu: "4"
+            memory: "16Gi"
+        env:
+        - name: ICE_SERVERS
+          value: "stun:stun.example:3478" # WebRTC ICE config
+        ports:
+        - containerPort: 7000
+          protocol: UDP # WebRTC media
+        volumeMounts:
+        - name: persistent-logs
+          mountPath: /var/log/cloudgame
+        readinessProbe:
+          tcpSocket:
+            port: 7000
+          initialDelaySeconds: 5
+          periodSeconds: 3
+      volumes:
+      - name: persistent-logs
+        hostPath:
+          path: /var/log/cloudgame
+          type: DirectoryOrCreate
+      # network: use Multus SR-IOV for deterministic latency (configured via CNI)
