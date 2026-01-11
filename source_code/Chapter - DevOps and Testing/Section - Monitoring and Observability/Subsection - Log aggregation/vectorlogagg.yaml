@@ -1,0 +1,53 @@
+# Vector config for constrained edge nodes (e.g., Raspberry Pi, Jetson)
+sources:
+  files:
+    type: file
+    include:
+      - /var/log/*.log
+      - /var/log/containers/*.log
+    ignore_older: 86400 # seconds; drop very old files
+
+transforms:
+  parse_json:
+    type: remap # high-performance transform
+    inputs: [files]
+    source: |
+      . = parse_json!(.message) ?? { message: .message } # parse if possible
+  redact:
+    type: remap
+    inputs: [parse_json]
+    source: |
+      del(.payload.ssn)        # remove PII fields
+      del(.payload.password)
+
+sinks:
+  http_out:
+    type: http
+    inputs: [redact]
+    uri: "https://regional-collector.example.com/v1/logs"
+    method: post
+    encoding:
+      codec: json
+    compression: gzip           # reduce bandwidth per eq.~\ref{eq:bandwidth}
+    request_in_flight_limit: 4  # backpressure, prevents OOM on tiny devices
+    batch:
+      max_bytes: 1048576        # 1 MiB batches for network efficiency
+      max_events: 500
+      timeout_secs: 2
+    tls:
+      enabled: true
+      verify_certificate: true
+      ca_file: /etc/ssl/certs/ca.pem
+      client_auth: # mutual TLS
+        cert: /etc/ssl/certs/edge.crt
+        key: /etc/ssl/private/edge.key
+    retry:
+      mode: exponential
+      max_retries: 10
+      initial_backoff: 0.5
+      max_backoff: 30
+
+healthchecks:
+  - type: http
+    interval_secs: 30
+    uri: "http://127.0.0.1:8686/metrics" # vector telemetry
