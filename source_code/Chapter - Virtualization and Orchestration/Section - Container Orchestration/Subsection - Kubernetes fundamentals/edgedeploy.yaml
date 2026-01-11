@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-edge
+  namespace: inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+    spec:
+      # Allow scheduling on nodes labeled 'edge=true' and with GPU 'nvidia.com/gpu'
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: edge
+                operator: In
+                values: ["true"]
+      tolerations:
+      - key: "gateway"
+        operator: "Exists"
+        effect: "NoSchedule"
+      initContainers:
+      - name: model-cache
+        image: alpine:3.18
+        command: ["/bin/sh","-c"]
+        args:
+        - wget -q -O /models/model.bin https://models.local/model.bin
+        volumeMounts:
+        - name: model-vol
+          mountPath: /models
+      containers:
+      - name: inference
+        image: myregistry.local/inference:2025-12-01
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        env:
+        - name: MODEL_PATH
+          value: /models/model.bin
+        volumeMounts:
+        - name: model-vol
+          mountPath: /models
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: model-vol
+        emptyDir: {} # small local cache; replace with hostPath or PVC for persistence
