@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: edge-agent
+  labels:
+    app: edge-agent
+spec:
+  nodeSelector:
+    kubernetes.io/arch: arm64   # schedule on ARM64 SoC nodes
+  containers:
+  - name: agent
+    image: registry.example.com/edge/agent:1.2.3
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    securityContext:
+      runAsNonRoot: true                # force non-root UID
+      runAsUser: 1000
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+        - ALL
+    volumeMounts:
+    - name: data
+      mountPath: /var/lib/agent
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: agent-pvc
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault            # runtime enforces seccomp
+    seLinuxOptions:
+      level: "s0:c123,c456"          # SELinux label for confinement
+  tolerations:
+  - key: "edge"
+    operator: "Exists"
+    effect: "NoSchedule"
