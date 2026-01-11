@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vision-inference
+  labels:
+    app: vision
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vision
+      role: inference
+  template:
+    metadata:
+      labels:
+        app: vision
+        role: inference
+      annotations:
+        linkerd.io/inject: "enabled"    # lightweight service-mesh sidecar
+    spec:
+      nodeSelector:
+        edge: "true"                   # schedule only on edge nodes
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: vision
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: inference
+          image: myregistry/vision-inference:v1.2.0
+          resources:
+            requests:
+              cpu: "500m"                # conservative requests for SoC
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          ports:
+            - containerPort: 50051
+          readinessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vision-inference-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vision-inference
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
