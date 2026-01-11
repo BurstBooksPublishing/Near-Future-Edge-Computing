@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fog-inference
+spec:
+  replicas: 3                         # horizontal redundancy for availability
+  selector:
+    matchLabels:
+      app: fog-inference
+  template:
+    metadata:
+      labels:
+        app: fog-inference
+    spec:
+      nodeSelector:
+        role: fog                     # label fog-capable nodes as role=fog
+      containers:
+      - name: model-server
+        image: myregistry/fog-model:1.2.0
+        resources:
+          requests:
+            cpu: "1"                  # reserve CPU for latency predictability
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+        ports:
+        - containerPort: 8501
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8501
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-fog-inference
+spec:
+  minAvailable: 2                     # avoid simultaneous maintenance impact
+  selector:
+    matchLabels:
+      app: fog-inference
