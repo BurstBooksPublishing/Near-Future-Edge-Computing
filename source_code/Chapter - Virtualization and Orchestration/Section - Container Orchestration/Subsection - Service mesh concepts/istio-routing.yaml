@@ -1,0 +1,38 @@
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: telemetry-svc-destination
+  # DestinationRule configures circuit breaker and outlier detection
+spec:
+  host: telemetry-svc.default.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 16            # limit for small edge nodes
+      http:
+        http1MaxPendingRequests: 32
+    outlierDetection:
+      consecutive5xxErrors: 5        # eject unhealthy hosts
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: telemetry-svc-routing
+  # VirtualService controls routing, retry, and timeout policies
+spec:
+  hosts:
+  - telemetry-svc.default.svc.cluster.local
+  http:
+  - route:
+    - destination:
+        host: telemetry-svc.default.svc.cluster.local
+        subset: stable
+      weight: 100
+    retries:
+      attempts: 2                    # conservative retries for edge
+      perTryTimeout: 200ms
+      retryOn: gateway-error,connect-failure,refused-stream
+    timeout: 800ms
