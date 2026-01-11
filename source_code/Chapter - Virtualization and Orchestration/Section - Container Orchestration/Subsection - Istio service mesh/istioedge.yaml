@@ -1,0 +1,42 @@
+# istio-minimal.yaml - install using: istioctl install -f istio-minimal.yaml
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  profile: minimal                    # minimal feature set for edge
+  values:
+    global:
+      proxy:
+        resources:
+          requests:
+            cpu: "50m"                # conservative proxy CPU request
+            memory: "64Mi"            # small proxy memory request
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+    telemetry:
+      enabled: false                  # disable heavy telemetry on-edge
+  components:
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+# VirtualService: route 90% to local service, 10% to cloud fallback via gateway
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: inference-routing
+spec:
+  hosts:
+    - inference.local.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: inference.local.svc.cluster.local
+            subset: v1
+          weight: 90
+        - destination:
+            host: inference.cloud.example.com  # egress via east-west gateway
+            port:
+              number: 443
+          weight: 10
+      timeout: 2s                         # strict timeout to prevent long stalls
