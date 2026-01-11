@@ -1,0 +1,22 @@
+import org.pytorch.Module
+import org.pytorch.IValue
+import org.pytorch.Tensor
+import org.pytorch.torchvision.TensorImageUtils
+import android.graphics.Bitmap
+// Load model from app assets (helper provided in Android NDK samples).
+val module = Module.load(assetFilePath(context, "model.ptl")) // load lite interpreter file
+
+// Preprocess bitmap to input tensor (normalize for the model).
+val inputTensor = TensorImageUtils.bitmapToFloat32Tensor(
+  bitmap, // camera frame or image
+  floatArrayOf(0.485f, 0.456f, 0.406f), // mean
+  floatArrayOf(0.229f, 0.224f, 0.225f)  // std
+)
+
+// Forward pass (IValue wrapper), then read outputs.
+val outputIValue = module.forward(IValue.from(inputTensor))
+val outputTensor = outputIValue.toTensor()
+val scores = outputTensor.dataAsFloatArray // postprocess on CPU (softmax, argmax)
+
+// Post-processing: apply threshold, NMS, or RPC to edge gateway as needed.
+// Comments: ensure model.ptl is optimized and quantized for your target device.
