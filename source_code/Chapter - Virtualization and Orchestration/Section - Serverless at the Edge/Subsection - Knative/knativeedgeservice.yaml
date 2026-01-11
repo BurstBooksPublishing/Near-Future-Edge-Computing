@@ -1,0 +1,45 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: edge-infer
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        # Keep one warm replica to avoid cold starts for critical flows
+        autoscaling.knative.dev/minScale: "1"
+        # Maximum replicas to bound resource usage on small clusters
+        autoscaling.knative.dev/maxScale: "4"
+        # Use a lightweight networking backend compatible with constrained nodes
+        networking.knative.dev/ingress.class: "kourier.ingress.networking.knative.dev"
+    spec:
+      # Limit concurrent requests per container to simplify tail-latency reasoning
+      containerConcurrency: 1
+      containers:
+        - image: registry.local:5000/edge-infer:arm64-v1   # multi-arch image in local registry
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MODEL_PATH
+              value: /models/resnet_quant.tflite
+          resources:
+            requests:
+              cpu: "250m"     # predictable scheduling on small SoCs
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # Readiness and liveness tuned for warm container reuse
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 1
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
