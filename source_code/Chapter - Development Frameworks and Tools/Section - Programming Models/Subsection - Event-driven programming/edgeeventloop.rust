@@ -1,0 +1,73 @@
+use tokio::{sync::mpsc, time};
+use rumqttc::{AsyncClient, MqttOptions, QoS};
+use std::time::Duration;
+
+// Bounded channel size controls backpressure.
+const CHANNEL_CAP: usize = 256;
+const SENSOR_POLL_MS: u64 = 10;
+
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> anyhow::Result<()> {
+    // MQTT client setup with keep-alive and TLS as required (placeholder).
+    let mut mqtt_opts = MqttOptions::new("edge-gateway", "broker.example", 8883);
+    mqtt_opts.set_keep_alive(Duration::from_secs(30));
+    let (mqtt_client, mut eventloop) = AsyncClient::new(mqtt_opts, 10);
+
+    // Bounded worker channel.
+    let (tx, mut rx) = mpsc::channel::>(CHANNEL_CAP);
+
+    // Sensor reader task: poll serial/CAN and enqueue frames.
+    let sensor_tx = tx.clone();
+    tokio::spawn(async move {
+        let mut ticker = time::interval(Duration::from_millis(SENSOR_POLL_MS));
+        loop {
+            ticker.tick().await;
+            // read_sensor_frame() should be non-blocking and return Option>
+            if let Some(frame) = read_sensor_frame().await {
+                if sensor_tx.try_send(frame).is_err() {
+                    // drop or count overflow metric; avoid blocking ISR-equivalent.
+                }
+            }
+        }
+    });
+
+    // Worker pool: bounded concurrency to limit CPU and memory usage.
+    for _ in 0..4 {
+        let mut rx_clone = rx.clone();
+        let mqtt = mqtt_client.clone();
+        tokio::spawn(async move {
+            while let Some(frame) = rx_clone.recv().await {
+                // expensive computation offloaded to dedicated thread pool if needed
+                let result = process_frame(&frame).await;
+                if result.is_anomaly {
+                    let _ = mqtt.publish("edge/anomaly", QoS::AtLeastOnce, false, result.payload).await;
+                }
+                // persist summary to local DB (non-blocking)
+                persist_summary_async(result.summary).await;
+            }
+        });
+    }
+
+    // MQTT eventloop: keep running separately for connection management.
+    tokio::spawn(async move {
+        loop {
+            if let Err(e) = eventloop.poll().await {
+                // log and handle reconnection/backoff
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    });
+
+    // Main task can be a control plane or await shutdown signal.
+    wait_for_termination_signal().await;
+    Ok(())
+}
+
+// --- placeholder async helpers (implement platform-specific I/O) ---
+async fn read_sensor_frame() -> Option> { None }
+async fn process_frame(_frame: &[u8]) -> ProcessingResult { ProcessingResult::default() }
+async fn persist_summary_async(_s: Summary) {}
+async fn wait_for_termination_signal() {}
+struct ProcessingResult { is_anomaly: bool, payload: Vec, summary: Summary }
+impl Default for ProcessingResult { fn default() -> Self { Self { is_anomaly:false, payload:Vec::new(), summary:Summary{} } } }
+struct Summary {}
