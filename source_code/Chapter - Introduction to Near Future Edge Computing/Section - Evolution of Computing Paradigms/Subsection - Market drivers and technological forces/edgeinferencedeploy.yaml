@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: edge-inference
+  template:
+    metadata:
+      labels:
+        app: edge-inference
+    spec:
+      containers:
+      - name: inference
+        image: myregistry.io/edge/inference:1.2.0
+        resources:
+          limits:
+            nvidia.com/gpu: 1           # GPU device plugin required
+            cpu: "2"
+            memory: "4Gi"
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+        env:
+        - name: MODEL_PATH
+          value: /models/resnet_opt.tflite
+        volumeMounts:
+        - name: models
+          mountPath: /models
+      nodeSelector:
+        edge-role: gpu-node            # label physical nodes accordingly
+      tolerations:
+      - key: "edge"
+        operator: "Exists"
+      volumes:
+      - name: models
+        hostPath:
+          path: /var/edge/models         # local model cache on node
+          type: Directory
