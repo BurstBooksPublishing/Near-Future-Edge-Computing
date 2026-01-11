@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: influxdb-pvc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 64Gi
+  storageClassName: local-path
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: influxdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: influxdb}
+  template:
+    metadata:
+      labels: {app: influxdb}
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: "arm64" # schedule to arm64 nodes
+      containers:
+      - name: influxdb
+        image: influxdb:2.9.0 # multi-arch official image
+        ports:
+        - containerPort: 8086
+        resources:
+          requests: {cpu: "500m", memory: "1Gi"}
+          limits: {cpu: "1", memory: "2Gi"}
+        env:
+        - name: INFLUXDB_INIT_ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef: {name: influx-secret, key: token} # store token in k8s secret
+        - name: INFLUXDB_INIT_USERNAME
+          value: "edgeadmin"
+        - name: INFLUXDB_INIT_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: influx-secret, key: password}
+        - name: INFLUXDB_INIT_ORG
+          value: "edge-org"
+        - name: INFLUXDB_INIT_BUCKET
+          value: "telemetry_raw"
+        volumeMounts:
+        - name: influxdb-storage
+          mountPath: /var/lib/influxdb2
+        livenessProbe:
+          httpGet: {path: /health, port: 8086}
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        readinessProbe:
+          httpGet: {path: /ready, port: 8086}
+          initialDelaySeconds: 15
+          periodSeconds: 10
+      volumes:
+      - name: influxdb-storage
+        persistentVolumeClaim:
+          claimName: influxdb-pvc
